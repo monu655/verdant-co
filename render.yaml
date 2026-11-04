@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: verdant-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: DATABASE_SSL, value: "true" }
+      - { key: BRAND_ID, value: verdant-co }
+      - { key: WEBHOOK_SECRET, value: verdant-demo-secret-2026 }
+      - { key: LLM_BASE_URL, value: https://openrouter.ai/api/v1 }
+      - { key: LLM_MODEL, value: meta-llama/llama-3.3-70b-instruct:free }
+      - { key: JWT_SECRET, generateValue: true }
+      - { key: DATABASE_URL, sync: false }
+      - { key: CORS_ORIGIN, sync: false }
+      - { key: LLM_API_KEY, sync: false }
+      - { key: SEED_AGENT_EMAIL, sync: false }
+      - { key: SEED_AGENT_PASSWORD, sync: false }
