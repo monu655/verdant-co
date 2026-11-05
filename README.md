@@ -2,7 +2,9 @@
 
 Customers message in (Customer view or signed webhook). An LLM drafts a reply from the knowledge base. A human agent edits and approves it. **Only approved replies ever reach the customer.**
 
-**Live app:** _add your Vercel URL_ · **Webhook:** `POST <your Render URL>/webhook` · **Agent login:** _add the email/password you seeded_
+**Live app:** https://web-tan-omega-aahuhopryl.vercel.app (Customer view at `/customer`, Agent view at `/agent`)
+**Webhook:** `POST https://verdant-api-ysdh.onrender.com/webhook` (header `X-Signature: sha256=<hex>`, test steps in `docs/WEBHOOK.md`)
+**Agent login (demo account, sample data only):** `agent@verdant.test` / `Verdant@2026` (also shown under the Sign in button)
 
 ## Run locally
 ```bash
@@ -21,7 +23,7 @@ Needs Node 20+ and Postgres (Supabase or local). Deploy steps: `DEPLOY.md`. Webh
 - **Data model.** `agents, customers, conversations, messages, ai_drafts, webhook_events`. A partial unique index enforces one open conversation per customer. Drafts are separate rows (`pending / used / superseded / failed`), so what the AI wrote and what the agent sent are both kept.
 - **Failure is visible, never faked.** If the provider fails, a `failed` draft with the reason is stored and the agent sees a Retry button. No placeholder reply is ever created.
 - **Retrieval: the whole knowledge base goes in the prompt.** It is seven short policies, so this is simple and exact. It stops working when a brand's KB no longer fits comfortably in the context (roughly a few thousand tokens) or answers start getting missed. Then move to keyword or embedding top-k retrieval.
-- **Auth.** bcrypt, JWT in an HTTP-only cookie, Origin check on state-changing routes, login rate limit.
+- **Auth.** bcrypt, JWT in an HTTP-only cookie, Origin check on state-changing routes, login rate limit. There is no public sign-up on purpose: agents see private customer chats, so accounts are created by an admin (seed), not by visitors.
 - **Left out for time:** realtime (the UI polls every 3-4 s), an automatic retry queue for failed drafts, agent assignment, user management, alerting, and tests that call a real LLM (the client is tested against a local stand-in provider).
 
 ## AI use
