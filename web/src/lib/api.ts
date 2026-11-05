@@ -40,7 +40,16 @@ export interface ConversationDetail {
   history: { id: string; status: string; created_at: string; first_message: string | null; message_count: number }[];
 }
 export interface Stats {
-  total_conversations: number; pending_conversations: number; approved_replies: number; avg_response_seconds: number | null;
+  total_conversations: number; open_conversations: number; resolved_conversations: number; total_customers: number;
+  pending_conversations: number; approved_replies: number; avg_response_seconds: number | null;
   drafts_total: number; drafts_sent_unedited: number; drafts_edited: number; drafts_failed: number; drafts_escalated: number;
+  days: 7 | 30;
   daily: { day: string; customer_messages: number; agent_replies: number }[];
+  period: {
+    customer_messages: number; prev_customer_messages: number; agent_replies: number; prev_agent_replies: number;
+    new_conversations: number; prev_new_conversations: number; avg_response_seconds: number | null; prev_avg_response_seconds: number | null;
+  };
+  topics: { label: string; count: number }[];
 }
+export interface KbEntry { id: string; topic: string; policy: string; updated_at: string }
+export interface ActivityEvent { id: string; sender: "customer" | "agent"; body: string; created_at: string; conversation_id: string; customer_name: string }

@@ -6,6 +6,7 @@ import { HttpError } from "../lib/errors.js";
 import type { LlmClient } from "../services/llm.js";
 import { generateDraft } from "../services/drafts.js";
 import { KNOWLEDGE_BASE } from "../services/knowledge.js";
+import { MAX_KB_ENTRIES, loadKnowledge } from "../services/knowledge.js";
 import { MAX_MESSAGE_LENGTH } from "../services/messages.js";
 
 const uuid = z.string().uuid();
@@ -168,11 +169,35 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
     } catch (e) { next(e); }
   });
 
-  r.get("/stats", async (_req, res, next) => {
+  const AVG_RESPONSE_SQL = `
+    SELECT avg(extract(epoch FROM (a.created_at - c.first_at)))::float AS v
+      FROM messages a
+      JOIN LATERAL (
+        SELECT min(m.created_at) AS first_at FROM messages m
+         WHERE m.conversation_id = a.conversation_id AND m.sender = 'customer' AND m.created_at < a.created_at
+           AND m.created_at > COALESCE((SELECT max(p.created_at) FROM messages p WHERE p.conversation_id = a.conversation_id AND p.sender = 'agent' AND p.created_at < a.created_at), '-infinity')
+      ) c ON c.first_at IS NOT NULL
+     WHERE a.sender = 'agent' AND a.created_at >= $1 AND a.created_at < $2`;
+
+  // Keyword groups used for the "what customers ask about" chart (simple, transparent, no AI involved).
+  const TOPICS: [string, string][] = [
+    ["Shipping and delivery", "ship|deliver|arriv|track|courier|dispatch"],
+    ["Returns and refunds", "return|refund|money back|exchange"],
+    ["Cancellation", "cancel"],
+    ["Cash on delivery", "cash on delivery|cod|payment"],
+    ["Address change", "address"],
+    ["Ingredients and allergies", "ingredient|allerg|vegan|fragrance|rash|reaction|serum"],
+  ];
+
+  r.get("/stats", async (req, res, next) => {
     try {
+      const { days } = z.object({ days: z.coerce.number().int().refine((n) => n === 7 || n === 30, "days must be 7 or 30").default(7) }).parse(req.query);
       const totals = (await db.query(`
         SELECT
           (SELECT count(*)::int FROM conversations) AS total_conversations,
+          (SELECT count(*)::int FROM conversations WHERE status = 'open') AS open_conversations,
+          (SELECT count(*)::int FROM conversations WHERE status = 'resolved') AS resolved_conversations,
+          (SELECT count(*)::int FROM customers) AS total_customers,
           (SELECT count(*)::int FROM conversations v WHERE v.status = 'open' AND
              (SELECT sender FROM messages WHERE conversation_id = v.id ORDER BY created_at DESC, id DESC LIMIT 1) = 'customer') AS pending_conversations,
           (SELECT count(*)::int FROM messages WHERE sender = 'agent') AS approved_replies,
@@ -180,25 +205,127 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
           (SELECT count(*)::int FROM ai_drafts WHERE status = 'used' AND final_body = body) AS drafts_sent_unedited,
           (SELECT count(*)::int FROM ai_drafts WHERE status = 'used' AND final_body <> body) AS drafts_edited,
           (SELECT count(*)::int FROM ai_drafts WHERE status = 'failed') AS drafts_failed,
-          (SELECT count(*)::int FROM ai_drafts WHERE needs_human) AS drafts_escalated,
-          (SELECT avg(extract(epoch FROM (a.created_at - c.first_at)))::float
-             FROM messages a
-             JOIN LATERAL (
-               SELECT min(m.created_at) AS first_at FROM messages m
-                WHERE m.conversation_id = a.conversation_id AND m.sender = 'customer' AND m.created_at < a.created_at
-                  AND m.created_at > COALESCE((SELECT max(p.created_at) FROM messages p WHERE p.conversation_id = a.conversation_id AND p.sender = 'agent' AND p.created_at < a.created_at), '-infinity')
-             ) c ON c.first_at IS NOT NULL
-            WHERE a.sender = 'agent') AS avg_response_seconds`)).rows[0];
+          (SELECT count(*)::int FROM ai_drafts WHERE needs_human) AS drafts_escalated`)).rows[0];
+
+      const overall = (await db.query(AVG_RESPONSE_SQL, ["-infinity", "infinity"])).rows[0].v as number | null;
+      const periodStart = `date_trunc('day', now()) - interval '${days - 1} days'`;
+      const prevStart = `date_trunc('day', now()) - interval '${2 * days - 1} days'`;
+      const per = (await db.query(`
+        SELECT
+          (SELECT count(*)::int FROM messages WHERE sender = 'customer' AND created_at >= ${periodStart}) AS customer_messages,
+          (SELECT count(*)::int FROM messages WHERE sender = 'customer' AND created_at >= ${prevStart} AND created_at < ${periodStart}) AS prev_customer_messages,
+          (SELECT count(*)::int FROM messages WHERE sender = 'agent' AND created_at >= ${periodStart}) AS agent_replies,
+          (SELECT count(*)::int FROM messages WHERE sender = 'agent' AND created_at >= ${prevStart} AND created_at < ${periodStart}) AS prev_agent_replies,
+          (SELECT count(*)::int FROM conversations WHERE created_at >= ${periodStart}) AS new_conversations,
+          (SELECT count(*)::int FROM conversations WHERE created_at >= ${prevStart} AND created_at < ${periodStart}) AS prev_new_conversations`)).rows[0];
+      const cur = (await db.query(AVG_RESPONSE_SQL.replace("$1", periodStart).replace("$2", "now() + interval '1 minute'"))).rows[0].v as number | null;
+      const prev = (await db.query(AVG_RESPONSE_SQL.replace("$1", prevStart).replace("$2", periodStart))).rows[0].v as number | null;
+
       const daily = (await db.query(`
         SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
                (SELECT count(*)::int FROM messages WHERE sender = 'customer' AND created_at >= d AND created_at < d + interval '1 day') AS customer_messages,
                (SELECT count(*)::int FROM messages WHERE sender = 'agent' AND created_at >= d AND created_at < d + interval '1 day') AS agent_replies
-          FROM generate_series(date_trunc('day', now()) - interval '6 days', date_trunc('day', now()), interval '1 day') d ORDER BY d`)).rows;
-      res.json({ ...totals, daily });
+          FROM generate_series(date_trunc('day', now()) - interval '${days - 1} days', date_trunc('day', now()), interval '1 day') d ORDER BY d`)).rows;
+
+      const topicSql = TOPICS.map((_, i) => `count(*) FILTER (WHERE body ~* $${i + 1})::int AS t${i}`).join(", ");
+      const topicRow = (await db.query(
+        `SELECT ${topicSql} FROM messages WHERE sender = 'customer' AND created_at >= ${periodStart}`,
+        TOPICS.map(([, re]) => re))).rows[0];
+      const topics = TOPICS.map(([label], i) => ({ label, count: topicRow[`t${i}`] as number })).sort((a, b) => b.count - a.count);
+
+      res.json({ ...totals, days, daily, avg_response_seconds: overall,
+        period: { ...per, avg_response_seconds: cur, prev_avg_response_seconds: prev }, topics });
     } catch (e) { next(e); }
   });
 
-  r.get("/knowledge-base", (_req, res) => res.json({ entries: KNOWLEDGE_BASE }));
+  // Latest things that happened, for the dashboard feed.
+  r.get("/activity", async (_req, res, next) => {
+    try {
+      const rows = (await db.query(`
+        SELECT m.id, m.sender, m.body, m.created_at, m.conversation_id, c.name AS customer_name
+          FROM messages m JOIN conversations v ON v.id = m.conversation_id JOIN customers c ON c.id = v.customer_id
+         ORDER BY m.created_at DESC, m.id DESC LIMIT 12`)).rows;
+      res.json({ events: rows });
+    } catch (e) { next(e); }
+  });
+
+  // ---- Knowledge base (editable; the AI reads the live version on every draft) ----
+  const kbSchema = z.object({
+    topic: z.string().trim().min(2, "Give the topic a name").max(60, "Topic is too long (max 60 characters)"),
+    policy: z.string().trim().min(10, "Describe the policy in a full sentence").max(600, "Policy is too long (max 600 characters)"),
+  });
+  const KB_COLUMNS = `id, topic, policy, updated_at`;
+
+  r.get("/knowledge-base", async (_req, res, next) => {
+    try {
+      const entries = (await db.query(`SELECT ${KB_COLUMNS} FROM knowledge_entries ORDER BY position, created_at`)).rows;
+      res.json({ entries, max: MAX_KB_ENTRIES });
+    } catch (e) { next(e); }
+  });
+
+  r.post("/knowledge-base", async (req, res, next) => {
+    try {
+      const body = kbSchema.parse(req.body);
+      const count = (await db.query(`SELECT count(*)::int AS n FROM knowledge_entries`)).rows[0].n as number;
+      if (count >= MAX_KB_ENTRIES) throw new HttpError(409, `The knowledge base is limited to ${MAX_KB_ENTRIES} entries so it fits in the AI prompt`, "conflict");
+      const row = (await db.query(
+        `INSERT INTO knowledge_entries (topic, policy, position) VALUES ($1, $2, COALESCE((SELECT max(position) FROM knowledge_entries), 0) + 1) RETURNING ${KB_COLUMNS}`,
+        [body.topic, body.policy])).rows[0];
+      res.status(201).json({ entry: row });
+    } catch (e) { next(e); }
+  });
+
+  r.patch("/knowledge-base/:id", async (req, res, next) => {
+    try {
+      const id = uuid.safeParse(req.params.id);
+      if (!id.success) throw new HttpError(404, "Entry not found", "not_found");
+      const body = kbSchema.parse(req.body);
+      const row = (await db.query(
+        `UPDATE knowledge_entries SET topic = $2, policy = $3, updated_at = now() WHERE id = $1 RETURNING ${KB_COLUMNS}`,
+        [id.data, body.topic, body.policy])).rows[0];
+      if (!row) throw new HttpError(404, "Entry not found", "not_found");
+      res.json({ entry: row });
+    } catch (e) { next(e); }
+  });
+
+  r.delete("/knowledge-base/:id", async (req, res, next) => {
+    try {
+      const id = uuid.safeParse(req.params.id);
+      if (!id.success) throw new HttpError(404, "Entry not found", "not_found");
+      const n = (await db.query(`SELECT count(*)::int AS n FROM knowledge_entries`)).rows[0].n as number;
+      if (n <= 1) throw new HttpError(409, "Keep at least one entry, otherwise the AI has nothing to answer from", "conflict");
+      const del = await db.query(`DELETE FROM knowledge_entries WHERE id = $1`, [id.data]);
+      if (!del.rowCount) throw new HttpError(404, "Entry not found", "not_found");
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  // Try the AI against the current knowledge base. Nothing is stored and nothing is sent to a customer.
+  r.post("/knowledge-base/test", async (req, res, next) => {
+    try {
+      const { question } = z.object({ question: z.string().trim().min(3, "Type a question to test").max(500, "Keep the question under 500 characters") }).parse(req.body);
+      const knowledge = await loadKnowledge(db);
+      try {
+        const out = await llm.draftReply({ history: [{ sender: "customer", body: question }], customerName: "Test customer", knowledge });
+        res.json({ reply: out.reply, needsHuman: out.needsHuman, model: out.model });
+      } catch (e) {
+        throw new HttpError(502, `${e instanceof Error ? e.message : "The AI could not answer"}. Try again in a moment.`, "ai_unavailable");
+      }
+    } catch (e) { next(e); }
+  });
+
+  // Put the original seven policies back.
+  r.post("/knowledge-base/reset", async (_req, res, next) => {
+    try {
+      await tx(db, async (c) => {
+        await c.query(`DELETE FROM knowledge_entries`);
+        let i = 1;
+        for (const k of KNOWLEDGE_BASE) await c.query(`INSERT INTO knowledge_entries (topic, policy, position) VALUES ($1, $2, $3)`, [k.topic, k.policy, i++]);
+      });
+      const entries = (await db.query(`SELECT ${KB_COLUMNS} FROM knowledge_entries ORDER BY position`)).rows;
+      res.json({ entries, max: MAX_KB_ENTRIES });
+    } catch (e) { next(e); }
+  });
 
   r.get("/settings", (req, res) =>
     res.json({ agent: req.agent, brandId: env.BRAND_ID, webhookPath: "/webhook", signatureHeader: "X-Signature", signatureFormat: "sha256=<hex HMAC-SHA256 of the raw body>" }));

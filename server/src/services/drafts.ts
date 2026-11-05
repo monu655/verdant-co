@@ -1,6 +1,7 @@
 import { tx, type Db } from "../db/pool.js";
 import { HttpError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
+import { loadKnowledge } from "./knowledge.js";
 import { LlmError, type LlmClient } from "./llm.js";
 
 const HISTORY_LIMIT = 12;
@@ -35,7 +36,8 @@ export async function generateDraft(db: Db, llm: LlmClient, messageId: string) {
   ).rows.reverse();
 
   try {
-    const out = await llm.draftReply({ history, customerName: String(row.customer_name) });
+    const knowledge = await loadKnowledge(db);
+    const out = await llm.draftReply({ history, customerName: String(row.customer_name), knowledge });
     return await tx(db, async (c) => {
       // A newer suggestion replaces older live ones in this conversation: the agent reviews one draft at a time.
       await c.query(
@@ -61,4 +63,26 @@ export async function generateDraft(db: Db, llm: LlmClient, messageId: string) {
     );
     return ins.rows[0];
   }
+}
+
+/**
+ * Startup recovery: for open conversations whose latest message is from the customer and that have no draft
+ * at all (the server stopped between saving the message and drafting), create the missing drafts.
+ * Failed drafts are left for the agent to retry on purpose, so a broken provider is not hammered on every restart.
+ */
+export async function recoverMissingDrafts(db: Db, llm: LlmClient, maxAgeHours = 24): Promise<number> {
+  const rows = (
+    await db.query(
+      `SELECT lm.id
+         FROM conversations v
+         JOIN LATERAL (SELECT id, sender, created_at FROM messages WHERE conversation_id = v.id ORDER BY created_at DESC, id DESC LIMIT 1) lm ON true
+        WHERE v.status = 'open' AND lm.sender = 'customer'
+          AND lm.created_at > now() - make_interval(hours => $1)
+          AND NOT EXISTS (SELECT 1 FROM ai_drafts d WHERE d.message_id = lm.id)
+        ORDER BY lm.created_at`,
+      [maxAgeHours],
+    )
+  ).rows;
+  for (const r of rows) await generateDraft(db, llm, r.id as string);
+  return rows.length;
 }

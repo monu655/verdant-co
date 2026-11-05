@@ -1,4 +1,7 @@
-// The only source of truth for suggested replies (from the assessment brief).
+import type { Db } from "../db/pool.js";
+
+// Default policies from the assessment brief. They seed the editable knowledge_entries table (migration 002)
+// and are the fallback if the table is ever empty.
 export const KNOWLEDGE_BASE = [
   { topic: "Shipping", policy: "Orders ship within 24 hours, Monday to Saturday. Delivery takes 3-5 business days in metro cities and 5-8 business days elsewhere in India." },
   { topic: "Address change", policy: "The delivery address can be changed only before the order has shipped, and only if the customer contacts us within 12 hours of placing it. After shipping, the address cannot be changed." },
@@ -8,3 +11,13 @@ export const KNOWLEDGE_BASE = [
   { topic: "Cash on delivery", policy: "Cash on delivery is available for orders under ₹3,000, with a ₹50 fee." },
   { topic: "Ingredients", policy: "All Verdant & Co products are fragrance-free and vegan." },
 ] as const;
+
+export interface KbEntry { topic: string; policy: string }
+
+/** The live knowledge base (what agents have edited), falling back to the defaults if it is empty. */
+export async function loadKnowledge(db: Db): Promise<KbEntry[]> {
+  const rows = (await db.query(`SELECT topic, policy FROM knowledge_entries ORDER BY position, created_at`)).rows as KbEntry[];
+  return rows.length ? rows : [...KNOWLEDGE_BASE];
+}
+
+export const MAX_KB_ENTRIES = 30;
