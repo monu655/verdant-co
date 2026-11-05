@@ -7,9 +7,9 @@ import { CustomerTopBar } from "../components/TopBar";
 import { Spinner } from "../components/ui";
 import { api, errorMessage, type Agent } from "../lib/api";
 
-// Shown only when set at build time (Vercel: Settings > Environment Variables). Never hard-coded in the repo.
-const DEMO_EMAIL = (import.meta.env.VITE_DEMO_EMAIL as string | undefined)?.trim();
-const DEMO_PASSWORD = (import.meta.env.VITE_DEMO_PASSWORD as string | undefined)?.trim();
+// Demo account details shown below the sign-in form (sample data only).
+const DEMO_EMAIL = "APNA-AGENT-EMAIL";
+const DEMO_PASSWORD = "APNA-AGENT-PASSWORD";
 const HAS_DEMO = Boolean(DEMO_EMAIL && DEMO_PASSWORD);
 
 const POINTS: { icon: LucideIcon; title: string; text: string }[] = [
