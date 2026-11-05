@@ -53,3 +53,8 @@ export interface Stats {
 }
 export interface KbEntry { id: string; topic: string; policy: string; updated_at: string }
 export interface ActivityEvent { id: string; sender: "customer" | "agent"; body: string; created_at: string; conversation_id: string; customer_name: string }
+export interface SettingsData {
+  agent: Agent; brandId: string; webhookUrl: string; signatureHeader: string; signatureFormat: string;
+  status: { database: boolean; aiConfigured: boolean; aiModel: string; aiHost: string; knowledgeEntries: number };
+}
+export interface WebhookSample { url: string; payload: string; signature: string }

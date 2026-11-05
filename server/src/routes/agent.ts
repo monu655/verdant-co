@@ -7,6 +7,7 @@ import type { LlmClient } from "../services/llm.js";
 import { generateDraft } from "../services/drafts.js";
 import { KNOWLEDGE_BASE } from "../services/knowledge.js";
 import { MAX_KB_ENTRIES, loadKnowledge } from "../services/knowledge.js";
+import { sign } from "../lib/signature.js";
 import { MAX_MESSAGE_LENGTH } from "../services/messages.js";
 
 const uuid = z.string().uuid();
@@ -25,7 +26,7 @@ SELECT v.id, v.status, v.last_message_at,
   JOIN LATERAL (SELECT body, sender FROM messages WHERE conversation_id = v.id ORDER BY created_at DESC, id DESC LIMIT 1) lm ON true
 `;
 
-export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | "WEBHOOK_SECRET">) {
+export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | "WEBHOOK_SECRET" | "LLM_API_KEY" | "LLM_MODEL" | "LLM_BASE_URL">) {
   const r = Router();
 
   r.get("/conversations", async (req, res, next) => {
@@ -48,7 +49,14 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
       let sql = `${LIST_SQL} WHERE ${where.join(" AND ")} ORDER BY v.last_message_at DESC LIMIT ${q.limit}`;
       if (q.filter === "unread") sql = `SELECT * FROM (${sql}) t WHERE t.unread > 0`;
       const rows = (await db.query(sql, params)).rows;
-      res.json({ conversations: rows });
+      // Tab badges: always for the whole inbox, ignoring the search box.
+      const counts = (await db.query(`
+        SELECT count(*) FILTER (WHERE status = 'open')::int AS open,
+               count(*) FILTER (WHERE status = 'open' AND needs_reply)::int AS needs_reply,
+               count(*) FILTER (WHERE status = 'open' AND unread > 0)::int AS unread,
+               count(*) FILTER (WHERE status = 'resolved')::int AS resolved
+          FROM (${LIST_SQL}) t`)).rows[0];
+      res.json({ conversations: rows, counts });
     } catch (e) { next(e); }
   });
 
@@ -327,8 +335,35 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
     } catch (e) { next(e); }
   });
 
-  r.get("/settings", (req, res) =>
-    res.json({ agent: req.agent, brandId: env.BRAND_ID, webhookPath: "/webhook", signatureHeader: "X-Signature", signatureFormat: "sha256=<hex HMAC-SHA256 of the raw body>" }));
+  const publicBase = (req: import("express").Request) => {
+    const host = req.get("x-forwarded-host")?.split(",")[0]?.trim() || req.get("host") || "localhost";
+    const local = /^(localhost|127\.0\.0\.1)/.test(host);
+    return `${local ? req.protocol : "https"}://${host}`;
+  };
+
+  r.get("/settings", async (req, res, next) => {
+    try {
+      const kb = (await db.query(`SELECT count(*)::int AS n FROM knowledge_entries`)).rows[0].n as number;
+      let database = true;
+      try { await db.query("SELECT 1"); } catch { database = false; }
+      res.json({
+        agent: req.agent, brandId: env.BRAND_ID,
+        webhookUrl: `${publicBase(req)}/webhook`, signatureHeader: "X-Signature", signatureFormat: "sha256=<hex HMAC-SHA256 of the raw body>",
+        status: { database, aiConfigured: Boolean(env.LLM_API_KEY), aiModel: env.LLM_MODEL, aiHost: (() => { try { return new URL(env.LLM_BASE_URL).host; } catch { return ""; } })(), knowledgeEntries: kb },
+      });
+    } catch (e) { next(e); }
+  });
+
+  // A ready-to-send, correctly signed sample event so the webhook can be tried in one paste.
+  r.get("/settings/webhook-sample", (req, res) => {
+    const stamp = Date.now();
+    const payload = JSON.stringify({
+      event_id: `evt_test_${stamp}`, type: "message.received", brand_id: env.BRAND_ID, timestamp: new Date().toISOString(),
+      customer: { id: "cust_webhook_test", name: "Webhook Test", phone: "+919800000099" },
+      message: { id: `msg_test_${stamp}`, type: "text", text: "What is your return policy?" },
+    });
+    res.json({ url: `${publicBase(req)}/webhook`, payload, signature: sign(payload, env.WEBHOOK_SECRET) });
+  });
 
   return r;
 }

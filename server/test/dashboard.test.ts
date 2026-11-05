@@ -82,3 +82,27 @@ describe("stats and activity", () => {
     expect((await ctx.request.get("/api/activity")).status).toBe(401);
   });
 });
+
+describe("settings and inbox counts", () => {
+  it("offers a signed sample event that the webhook accepts, and reports system status", async () => {
+    const { cookie } = await login(ctx.request);
+    expect((await ctx.request.get("/api/settings/webhook-sample")).status).toBe(401);
+    const set = await ctx.request.get("/api/settings").set("Cookie", cookie);
+    expect(set.body.webhookUrl).toMatch(/\/webhook$/);
+    expect(set.body.status).toMatchObject({ database: true, knowledgeEntries: 7 });
+    expect(JSON.stringify(set.body)).not.toContain("verdant-demo-secret");
+
+    const sample = (await ctx.request.get("/api/settings/webhook-sample").set("Cookie", cookie)).body;
+    const res = await ctx.request.post("/webhook").set("Content-Type", "application/json").set("X-Signature", sample.signature).send(sample.payload);
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(sample)).not.toContain("verdant-demo-secret");
+  });
+
+  it("returns tab counts with the conversation list", async () => {
+    const { cookie } = await login(ctx.request);
+    await postWebhook(ctx.request, webhookBody());
+    await waitForDraft(ctx.db);
+    const r = await ctx.request.get("/api/conversations").set("Cookie", cookie);
+    expect(r.body.counts).toEqual({ open: 1, needs_reply: 1, unread: 1, resolved: 0 });
+  });
+});

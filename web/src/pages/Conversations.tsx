@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCheck, CircleCheck, Copy, Inbox, Info, MessageSquare, Phone, RefreshCw, RotateCcw, Search, Send, Sparkles, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, CheckCheck, CircleCheck, Clock, Copy, Inbox, Info, MessageSquare, Phone, RefreshCw, RotateCcw, Search, Send, Sparkles, TriangleAlert, Undo2, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Avatar, Badge, ConfirmDialog, EmptyState, ErrorState, Skeleton, Spinner, useToast } from "../components/ui";
 import { api, errorMessage, type ConversationDetail, type ConversationSummary } from "../lib/api";
-import { fullTime, shortTime } from "../lib/format";
+import { fullTime, shortTime, timeAgo } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 
 const FILTERS = [
@@ -14,6 +14,24 @@ const FILTERS = [
   { id: "resolved", label: "Resolved" },
 ] as const;
 type FilterId = (typeof FILTERS)[number]["id"];
+interface Counts { open: number; needs_reply: number; unread: number; resolved: number }
+const COUNT_KEY: Record<FilterId, keyof Counts> = { all: "open", needs_reply: "needs_reply", unread: "unread", resolved: "resolved" };
+
+const QUICK_REPLIES = [
+  { label: "Thanks", text: "Thank you for reaching out to Verdant & Co. " },
+  { label: "Checking", text: "I am checking this with our team and will get back to you shortly. " },
+  { label: "Need details", text: "Could you please share your order number so we can look into this? " },
+  { label: "Anything else?", text: "Is there anything else I can help you with? " },
+];
+
+const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
+function dayLabel(iso: string) {
+  const d = new Date(iso); const now = new Date();
+  if (d.toDateString() === now.toDateString()) return "Today";
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+}
 
 /* ------------------------------ List ------------------------------ */
 function ConversationList({ activeId }: { activeId?: string }) {
@@ -22,7 +40,7 @@ function ConversationList({ activeId }: { activeId?: string }) {
   const dq = useDebounced(q.trim());
   const list = useQuery({
     queryKey: ["conversations", filter, dq],
-    queryFn: () => api<{ conversations: ConversationSummary[] }>(`/api/conversations?filter=${filter}&q=${encodeURIComponent(dq)}`),
+    queryFn: () => api<{ conversations: ConversationSummary[]; counts: Counts }>(`/api/conversations?filter=${filter}&q=${encodeURIComponent(dq)}`),
     refetchInterval: 4000,
     placeholderData: (prev) => prev,
   });
@@ -39,7 +57,12 @@ function ConversationList({ activeId }: { activeId?: string }) {
         <div role="tablist" aria-label="Filter" className="flex gap-1 rounded-lg bg-canvas p-1">
           {FILTERS.map((f) => (
             <button key={f.id} role="tab" aria-selected={filter === f.id} onClick={() => setFilter(f.id)}
-              className={`h-8 flex-1 whitespace-nowrap rounded-md px-1.5 text-[13px] font-medium transition-colors ${filter === f.id ? "bg-white text-forest-900 shadow-card" : "text-muted hover:text-ink"}`}>{f.label}</button>
+              className={`flex h-8 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-1.5 text-[13px] font-medium transition-colors ${filter === f.id ? "bg-white text-forest-900 shadow-card" : "text-muted hover:text-ink"}`}>
+              {f.label}
+              {list.data?.counts && list.data.counts[COUNT_KEY[f.id]] > 0 && f.id !== "all" && f.id !== "resolved" && (
+                <span className={`min-w-4 rounded-full px-1 text-[11px] font-semibold leading-4 ${filter === f.id ? "bg-emerald-600 text-white" : "bg-mint-100 text-forest-900"}`}>{list.data.counts[COUNT_KEY[f.id]]}</span>
+              )}
+            </button>
           ))}
         </div>
       </div>
@@ -66,7 +89,10 @@ function ConversationList({ activeId }: { activeId?: string }) {
                     <span className={`truncate text-sm ${c.unread ? "text-ink" : "text-muted"}`}>{c.last_sender === "agent" && "You: "}{c.last_body}</span>
                     {c.unread > 0 && <span aria-label={`${c.unread} unread`} className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-xs font-semibold text-white">{c.unread}</span>}
                   </span>
-                  {c.has_draft && <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-emerald-600"><Sparkles aria-hidden className="h-3 w-3" />Draft ready</span>}
+                  <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {c.has_draft && <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600"><Sparkles aria-hidden className="h-3 w-3" />Draft ready</span>}
+                    {c.needs_reply && c.status === "open" && <span className="inline-flex items-center gap-1 text-xs text-muted"><Clock aria-hidden className="h-3 w-3" />Waiting {timeAgo(c.last_message_at).replace(" ago", "")}</span>}
+                  </span>
                 </span>
               </Link>
             </li>
@@ -140,12 +166,15 @@ function DraftCard({ detail }: { detail: ConversationDetail }) {
         <p className="mb-3 flex items-start gap-2 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-900"><TriangleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />The knowledge base doesn't fully cover this. Check the facts before you approve.</p>
       )}
       <label htmlFor="draft-text" className="sr-only">Edit suggested reply</label>
-      <textarea id="draft-text" className="w-full resize-y rounded-lg border border-line bg-white p-3 text-sm leading-relaxed focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20" rows={5} maxLength={2000} value={text} disabled={busy} onChange={(e) => setText(e.target.value)} />
+      <textarea id="draft-text" className="w-full resize-y rounded-lg border border-line bg-white p-3 text-sm leading-relaxed focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20" rows={5} maxLength={2000} value={text} disabled={busy} onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim() && draftId && !busy) { e.preventDefault(); approve.mutate(); } }} />
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted">{edited ? <Badge tone="amber">Edited</Badge> : "Unedited"} · {text.length}/2000</span>
+        <span className="flex items-center gap-2 text-xs text-muted">{edited ? <Badge tone="amber">Edited</Badge> : "Unedited"} · {text.length}/2000
+          {edited && <button type="button" className="inline-flex items-center gap-1 font-medium text-emerald-600 hover:underline" disabled={busy} onClick={() => setText(draft?.body ?? "")}><Undo2 aria-hidden className="h-3 w-3" />Reset to AI draft</button>}
+        </span>
         <div className="ml-auto flex gap-2">
           <button className="btn-secondary" disabled={busy} onClick={() => regenerate.mutate()}>{regenerate.isPending ? <Spinner /> : <RefreshCw aria-hidden className="h-4 w-4" />}Regenerate</button>
-          <button className="btn-primary" disabled={busy || !text.trim() || !draftId} onClick={() => approve.mutate()}>{approve.isPending ? <Spinner /> : <CheckCheck aria-hidden className="h-4 w-4" />}Approve reply</button>
+          <button className="btn-primary" disabled={busy || !text.trim() || !draftId} onClick={() => approve.mutate()}>{approve.isPending ? <Spinner /> : <CheckCheck aria-hidden className="h-4 w-4" />}Approve and send</button>
         </div>
       </div>
     </div>
@@ -166,6 +195,14 @@ function Composer({ conversationId, disabled }: { conversationId: string; disabl
   const onKey = (e: KeyboardEvent) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); } };
   return (
     <div className="border-t border-line bg-white p-3 sm:p-4">
+      {!disabled && (
+        <div className="-mx-1 mb-2 flex items-center gap-2 overflow-x-auto px-1 pb-1" aria-label="Quick replies">
+          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-muted"><Zap aria-hidden className="h-3.5 w-3.5" />Quick replies</span>
+          {QUICK_REPLIES.map((q) => (
+            <button key={q.label} type="button" className="shrink-0 rounded-full border border-line px-3 py-1 text-xs hover:border-emerald-600 hover:bg-mint-50" onClick={() => { setText((t) => (t ? t + (t.endsWith(" ") ? "" : " ") : "") + q.text); document.getElementById("composer")?.focus(); }}>{q.label}</button>
+          ))}
+        </div>
+      )}
       <div className="flex items-end gap-2">
         <label htmlFor="composer" className="sr-only">Write a reply</label>
         <textarea id="composer" rows={2} maxLength={2000} disabled={disabled || send.isPending} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
@@ -267,12 +304,17 @@ function Chat({ id, onShowDetails, onToggleStatus, toggling }: { id: string; onS
       </header>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-canvas p-3 sm:p-5">
-        {detail.messages.map((m) => (
-          <div key={m.id} className={`message-in flex ${m.sender === "agent" ? "justify-end" : "justify-start"}`}>
+        {detail.messages.map((m, i) => (
+          <div key={m.id} className="space-y-3">
+            {(i === 0 || !sameDay(detail.messages[i - 1]!.created_at, m.created_at)) && (
+              <div className="flex items-center gap-3 py-1" role="separator"><span className="h-px flex-1 bg-line" /><span className="text-xs font-medium text-muted">{dayLabel(m.created_at)}</span><span className="h-px flex-1 bg-line" /></div>
+            )}
+          <div className={`message-in flex ${m.sender === "agent" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] sm:max-w-[70%] ${m.sender === "agent" ? "items-end" : "items-start"} flex flex-col gap-1`}>
               <p className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${m.sender === "agent" ? "rounded-br-md bg-forest-900 text-white" : "rounded-bl-md border border-line bg-white"}`}>{m.body}</p>
-              <span className="px-1 text-xs text-muted">{m.sender === "agent" ? "Approved reply · " : ""}{shortTime(m.created_at)}</span>
+              <span className="px-1 text-xs text-muted">{m.sender === "agent" ? "Approved reply · " : ""}{new Date(m.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
             </div>
+          </div>
           </div>
         ))}
         {!resolved && <DraftCard detail={detail} />}
