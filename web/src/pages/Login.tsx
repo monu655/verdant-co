@@ -8,8 +8,8 @@ import { Spinner } from "../components/ui";
 import { api, errorMessage, type Agent } from "../lib/api";
 
 // Demo account details shown below the sign-in form (sample data only).
-const DEMO_EMAIL = "APNA-AGENT-EMAIL";
-const DEMO_PASSWORD = "APNA-AGENT-PASSWORD";
+const DEMO_EMAIL = "agent@verdant.test";
+const DEMO_PASSWORD = "Verdant@2026";
 const HAS_DEMO = Boolean(DEMO_EMAIL && DEMO_PASSWORD);
 
 const POINTS: { icon: LucideIcon; title: string; text: string }[] = [
