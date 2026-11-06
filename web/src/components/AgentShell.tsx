@@ -107,7 +107,7 @@ export function AgentShell({ agent }: { agent: Agent }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <AgentTopBar agent={agent} collapsed={collapsed} onToggleSidebar={toggle} />
-        <main className="min-h-0 flex-1 overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0"><Suspense fallback={<div className="p-6" aria-busy="true"><div className="h-10 w-56 animate-pulse rounded-lg bg-mint-100" /><div className="mt-4 h-40 animate-pulse rounded-xl bg-mint-100" /></div>}><Outlet /></Suspense></main>
+        <main className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0"><Suspense fallback={<div className="p-6" aria-busy="true"><div className="h-10 w-56 animate-pulse rounded-lg bg-mint-100" /><div className="mt-4 h-40 animate-pulse rounded-xl bg-mint-100" /></div>}><Outlet /></Suspense></main>
         <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
           {ALL_ITEMS.map(({ to, label, short, icon: Icon, end, badge }) => {
             const count = badge === "pending" ? pending : 0;
