@@ -4,7 +4,7 @@ import { useState } from "react";
 /** Change versus the previous period. `goodWhen` says which direction is good (response time: down). */
 export function Delta({ now, before, goodWhen = "up", suffix = "vs previous period" }: { now: number | null; before: number | null; goodWhen?: "up" | "down"; suffix?: string }) {
   if (now === null || before === null || (before === 0 && now === 0)) return <span className="text-xs text-muted">No change yet</span>;
-  if (before === 0) return <span className="text-xs text-muted">First activity in this period</span>;
+  if (before === 0) return <span className="text-xs text-muted">New this period</span>;
   const pct = Math.round(((now - before) / before) * 100);
   if (pct === 0) return <span className="inline-flex items-center gap-1 text-xs text-muted"><Minus aria-hidden className="h-3 w-3" />No change {suffix}</span>;
   const good = goodWhen === "up" ? pct > 0 : pct < 0;
@@ -36,13 +36,13 @@ export function Ring({ value, total, label, size = 112 }: { value: number; total
   const r = 44, c = 2 * Math.PI * r;
   const pct = total > 0 ? value / total : 0;
   return (
-    <div className="relative" style={{ width: size, height: size }}>
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg role="img" aria-label={`${label}: ${Math.round(pct * 100)}%`} viewBox="0 0 100 100" className="h-full w-full -rotate-90">
         <circle cx="50" cy="50" r={r} fill="none" stroke="#D1FAE5" strokeWidth="10" />
         <circle cx="50" cy="50" r={r} fill="none" stroke="#059669" strokeWidth="10" strokeLinecap="round" strokeDasharray={`${pct * c} ${c}`} style={{ transition: "stroke-dasharray .6s ease" }} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-semibold tabular-nums">{total > 0 ? Math.round(pct * 100) : 0}%</span>
+        <span className="font-semibold leading-none tabular-nums" style={{ fontSize: Math.round(size * 0.22) }}>{total > 0 ? Math.round(pct * 100) : 0}%</span>
       </div>
     </div>
   );

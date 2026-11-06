@@ -117,15 +117,15 @@ export function ProfileMenu({ agent }: { agent: Agent }) {
 export function AgentTopBar({ agent, collapsed, onToggleSidebar }: { agent: Agent; collapsed: boolean; onToggleSidebar: () => void }) {
   const [mobileSearch, setMobileSearch] = useState(false);
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur-sm">
-      <div className="flex h-16 items-center gap-3 px-3 sm:px-5">
+    <header className="sticky top-0 z-30 border-b border-line bg-white pt-[env(safe-area-inset-top)]">
+      <div className="flex h-16 items-center gap-2 px-3 sm:gap-3 sm:px-5">
         <button aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} className="btn-ghost hidden h-10 w-10 px-0 lg:inline-flex" onClick={onToggleSidebar}>
           {collapsed ? <PanelLeftOpen aria-hidden className="h-5 w-5" /> : <PanelLeftClose aria-hidden className="h-5 w-5" />}
         </button>
-        <span className="lg:hidden"><Logo compact /></span>
-        <ModeSwitch />
+        <span className="shrink-0 lg:hidden"><Logo compact /></span>
+        <ModeSwitch iconsOnPhones />
         <div className="mx-auto hidden w-full max-w-md md:block"><GlobalSearch /></div>
-        <div className="ml-auto flex items-center gap-1 md:ml-0">
+        <div className="ml-auto flex shrink-0 items-center md:ml-0">
           <button aria-label="Search conversations" className="btn-ghost h-10 w-10 px-0 md:hidden" onClick={() => setMobileSearch((s) => !s)}>{mobileSearch ? <X aria-hidden className="h-5 w-5" /> : <Search aria-hidden className="h-5 w-5" />}</button>
           <Notifications />
           <ProfileMenu agent={agent} />
@@ -138,7 +138,7 @@ export function AgentTopBar({ agent, collapsed, onToggleSidebar }: { agent: Agen
 
 export function CustomerTopBar() {
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-white/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm">
+    <header className="sticky top-0 z-30 border-b border-line bg-white pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4 sm:px-8">
         <Link to="/customer" aria-label="Verdant & Co home" className="rounded-lg">
           <span className="sm:hidden"><Logo compact /></span>

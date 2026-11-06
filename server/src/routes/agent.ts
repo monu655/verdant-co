@@ -200,7 +200,7 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
   r.get("/stats", async (req, res, next) => {
     try {
       const { days } = z.object({ days: z.coerce.number().int().refine((n) => n === 7 || n === 30, "days must be 7 or 30").default(7) }).parse(req.query);
-      const totals = (await db.query(`
+      const totalsQ = db.query(`
         SELECT
           (SELECT count(*)::int FROM conversations) AS total_conversations,
           (SELECT count(*)::int FROM conversations WHERE status = 'open') AS open_conversations,
@@ -213,32 +213,35 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
           (SELECT count(*)::int FROM ai_drafts WHERE status = 'used' AND final_body = body) AS drafts_sent_unedited,
           (SELECT count(*)::int FROM ai_drafts WHERE status = 'used' AND final_body <> body) AS drafts_edited,
           (SELECT count(*)::int FROM ai_drafts WHERE status = 'failed') AS drafts_failed,
-          (SELECT count(*)::int FROM ai_drafts WHERE needs_human) AS drafts_escalated`)).rows[0];
+          (SELECT count(*)::int FROM ai_drafts WHERE needs_human) AS drafts_escalated`);
 
-      const overall = (await db.query(AVG_RESPONSE_SQL, ["-infinity", "infinity"])).rows[0].v as number | null;
+      const overallQ = db.query(AVG_RESPONSE_SQL, ["-infinity", "infinity"]);
       const periodStart = `date_trunc('day', now()) - interval '${days - 1} days'`;
       const prevStart = `date_trunc('day', now()) - interval '${2 * days - 1} days'`;
-      const per = (await db.query(`
+      const perQ = db.query(`
         SELECT
           (SELECT count(*)::int FROM messages WHERE sender = 'customer' AND created_at >= ${periodStart}) AS customer_messages,
           (SELECT count(*)::int FROM messages WHERE sender = 'customer' AND created_at >= ${prevStart} AND created_at < ${periodStart}) AS prev_customer_messages,
           (SELECT count(*)::int FROM messages WHERE sender = 'agent' AND created_at >= ${periodStart}) AS agent_replies,
           (SELECT count(*)::int FROM messages WHERE sender = 'agent' AND created_at >= ${prevStart} AND created_at < ${periodStart}) AS prev_agent_replies,
           (SELECT count(*)::int FROM conversations WHERE created_at >= ${periodStart}) AS new_conversations,
-          (SELECT count(*)::int FROM conversations WHERE created_at >= ${prevStart} AND created_at < ${periodStart}) AS prev_new_conversations`)).rows[0];
-      const cur = (await db.query(AVG_RESPONSE_SQL.replace("$1", periodStart).replace("$2", "now() + interval '1 minute'"))).rows[0].v as number | null;
-      const prev = (await db.query(AVG_RESPONSE_SQL.replace("$1", prevStart).replace("$2", periodStart))).rows[0].v as number | null;
+          (SELECT count(*)::int FROM conversations WHERE created_at >= ${prevStart} AND created_at < ${periodStart}) AS prev_new_conversations`);
+      const curQ = db.query(AVG_RESPONSE_SQL.replace("$1", periodStart).replace("$2", "now() + interval '1 minute'"));
+      const prevQ = db.query(AVG_RESPONSE_SQL.replace("$1", prevStart).replace("$2", periodStart));
 
-      const daily = (await db.query(`
+      const dailyQ = db.query(`
         SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
                (SELECT count(*)::int FROM messages WHERE sender = 'customer' AND created_at >= d AND created_at < d + interval '1 day') AS customer_messages,
                (SELECT count(*)::int FROM messages WHERE sender = 'agent' AND created_at >= d AND created_at < d + interval '1 day') AS agent_replies
-          FROM generate_series(date_trunc('day', now()) - interval '${days - 1} days', date_trunc('day', now()), interval '1 day') d ORDER BY d`)).rows;
+          FROM generate_series(date_trunc('day', now()) - interval '${days - 1} days', date_trunc('day', now()), interval '1 day') d ORDER BY d`);
 
       const topicSql = TOPICS.map((_, i) => `count(*) FILTER (WHERE body ~* $${i + 1})::int AS t${i}`).join(", ");
-      const topicRow = (await db.query(
+      const topicQ = db.query(
         `SELECT ${topicSql} FROM messages WHERE sender = 'customer' AND created_at >= ${periodStart}`,
-        TOPICS.map(([, re]) => re))).rows[0];
+        TOPICS.map(([, re]) => re));
+      const [totalsR, overallR, perR, curR, prevR, dailyR, topicR] = await Promise.all([totalsQ, overallQ, perQ, curQ, prevQ, dailyQ, topicQ]);
+      const totals = totalsR.rows[0], overall = overallR.rows[0].v as number | null, per = perR.rows[0];
+      const cur = curR.rows[0].v as number | null, prev = prevR.rows[0].v as number | null, daily = dailyR.rows, topicRow = topicR.rows[0];
       const topics = TOPICS.map(([label], i) => ({ label, count: topicRow[`t${i}`] as number })).sort((a, b) => b.count - a.count);
 
       res.json({ ...totals, days, daily, avg_response_seconds: overall,
