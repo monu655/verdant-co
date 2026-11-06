@@ -51,12 +51,12 @@ function TryWebhook() {
   const curl = d ? `curl -X POST "${d.url}" -H "Content-Type: application/json" -H "X-Signature: ${d.signature}" -d '${d.payload}'` : "";
   return (
     <div className="rounded-xl border border-line bg-canvas p-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold">Try the webhook</h3>
           <p className="mt-0.5 text-xs text-muted">Creates a correctly signed sample request. Run it, and a "Webhook Test" conversation appears in your inbox. Sending it twice returns "duplicate".</p>
         </div>
-        <button type="button" className="btn-primary" onClick={() => sample.mutate()} disabled={sample.isPending}>
+        <button type="button" className="btn-primary w-full sm:w-auto sm:shrink-0" onClick={() => sample.mutate()} disabled={sample.isPending}>
           {sample.isPending ? <Spinner /> : d ? <RefreshCw aria-hidden className="h-4 w-4" /> : <PlayCircle aria-hidden className="h-4 w-4" />}{d ? "New sample" : "Generate sample"}
         </button>
       </div>
