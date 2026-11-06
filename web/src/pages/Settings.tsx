@@ -22,9 +22,9 @@ function CopyField({ id, label, value }: { id: string; label: string; value: str
   return (
     <div className="space-y-1.5">
       <p className="text-sm font-medium">{label}</p>
-      <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg border border-line bg-canvas px-3 py-2.5 text-sm">{value}</code>
-        <button className="btn-secondary h-10 w-10 shrink-0 px-0" aria-label={`Copy ${label}`} onClick={() => copy(id, value)}>
+      <div className="flex items-center gap-2 max-sm:items-start">
+        <code className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded-lg border border-line bg-canvas px-3 py-2.5 text-sm sm:overflow-x-auto sm:whitespace-nowrap sm:break-normal">{value}</code>
+        <button className="btn-secondary h-10 w-10 shrink-0 self-start px-0" aria-label={`Copy ${label}`} onClick={() => copy(id, value)}>
           {done === id ? <Check aria-hidden className="h-4 w-4 text-ok" /> : <Copy aria-hidden className="h-4 w-4" />}
         </button>
       </div>
@@ -34,11 +34,11 @@ function CopyField({ id, label, value }: { id: string; label: string; value: str
 
 function StatusRow({ ok, label, detail }: { ok: boolean; label: string; detail: ReactNode }) {
   return (
-    <li className="flex items-center gap-3 py-3">
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
       <span aria-hidden className={`h-2.5 w-2.5 shrink-0 rounded-full ${ok ? "bg-ok" : "bg-danger"}`} />
       <span className="flex-1 text-sm font-medium">{label}</span>
-      <span className="min-w-0 truncate text-sm text-muted">{detail}</span>
       <Badge tone={ok ? "green" : "red"}>{ok ? "OK" : "Needs attention"}</Badge>
+      <span className="order-last basis-full break-words pl-[22px] text-sm text-muted sm:order-none sm:basis-auto sm:max-w-[55%] sm:truncate sm:pl-0 sm:text-right">{detail}</span>
     </li>
   );
 }
@@ -100,14 +100,16 @@ export function SettingsPage() {
       </div>
       {q.isError && !s ? <div className="card"><ErrorState message="Couldn't load settings." onRetry={() => q.refetch()} /></div> : !s ? <div className="space-y-6"><Skeleton className="h-32" /><Skeleton className="h-56" /><Skeleton className="h-80" /></div> : (<>
         <section className="card p-5" aria-labelledby="acct">
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-1 items-center gap-4">
             <Avatar name={s.agent.name} size={56} />
             <div className="min-w-0 flex-1">
-              <h2 id="acct" className="truncate text-lg font-semibold">{s.agent.name}</h2>
-              <p className="truncate text-sm text-muted">{s.agent.email}</p>
+              <h2 id="acct" className="break-words text-lg font-semibold">{s.agent.name}</h2>
+              <p className="break-all text-sm text-muted">{s.agent.email}</p>
               <div className="mt-1.5"><Badge tone="green"><ShieldCheck aria-hidden className="h-3 w-3" />Support agent</Badge></div>
             </div>
-            <button type="button" className="btn-secondary" onClick={() => setConfirm(true)}><LogOut aria-hidden className="h-4 w-4" />Sign out</button>
+            </div>
+            <button type="button" className="btn-secondary w-full sm:w-auto" onClick={() => setConfirm(true)}><LogOut aria-hidden className="h-4 w-4" />Sign out</button>
           </div>
         </section>
 
@@ -122,12 +124,12 @@ export function SettingsPage() {
         </section>
 
         <section className="card space-y-4 p-5" aria-labelledby="hook">
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mint-100 text-forest-900"><Webhook aria-hidden className="h-[18px] w-[18px]" /></span>
-            <div>
+          <div>
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mint-100 text-forest-900"><Webhook aria-hidden className="h-[18px] w-[18px]" /></span>
               <h2 id="hook" className="font-semibold">Webhook</h2>
-              <p className="mt-0.5 text-sm text-muted">Your chat system sends each new customer message here as a JSON POST. Requests without a valid signature are rejected with 401.</p>
             </div>
+            <p className="mt-2 text-sm text-muted">Your chat system sends each new customer message here as a JSON POST. Requests without a valid signature are rejected with 401.</p>
           </div>
           <CopyField id="url" label="Endpoint (POST)" value={s.webhookUrl} />
           <CopyField id="sig" label="Signature header" value={`${s.signatureHeader}: ${s.signatureFormat}`} />
