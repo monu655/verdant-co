@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Db } from "../db/pool.js";
 import type { Env } from "../config/env.js";
 import type { LlmClient } from "../services/llm.js";
+import { tx } from "../db/pool.js";
 import { MAX_MESSAGE_LENGTH, receiveCustomerMessage, startDraft } from "../services/messages.js";
 import { HttpError } from "../lib/errors.js";
 
@@ -73,12 +74,42 @@ export function customerRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID"
       const c = cust.rows[0];
       if (!c || normalizePhone(c.phone) !== normalizePhone(q.data.phone)) return res.json({ messages: [] });
       const msgs = await db.query(
-        `SELECT m.id, m.sender, m.body, m.created_at
+        `SELECT m.id, m.sender, m.body, m.created_at, m.edited_at
            FROM messages m JOIN conversations v ON v.id = m.conversation_id
           WHERE v.customer_id = $1 ORDER BY m.created_at, m.id`,
         [c.id],
       );
       res.json({ messages: msgs.rows });
+    } catch (e) { next(e); }
+  });
+  // A customer may fix their own latest message until an agent has replied. The draft is then rewritten from the new text.
+  r.patch("/messages/:id", async (req, res, next) => {
+    try {
+      const id = z.string().uuid().safeParse(req.params.id);
+      const body = z.object({
+        customer: z.object({ id: z.string().trim().min(1).max(200), phone: z.string().trim().min(3).max(30) }),
+        text: z.string().trim().min(1, "Message cannot be empty").max(MAX_MESSAGE_LENGTH),
+      }).safeParse(req.body);
+      if (!id.success) throw new HttpError(404, "Message not found", "not_found");
+      if (!body.success) throw new HttpError(400, body.error.issues[0]?.message ?? "Invalid request", "validation");
+
+      const row = (await db.query(
+        `SELECT m.id, m.body, m.sender, m.conversation_id, v.status, c.phone,
+                (SELECT id FROM messages WHERE conversation_id = m.conversation_id ORDER BY created_at DESC, id DESC LIMIT 1) AS latest_id
+           FROM messages m JOIN conversations v ON v.id = m.conversation_id JOIN customers c ON c.id = v.customer_id
+          WHERE m.id = $1 AND c.brand_id = $2 AND c.external_id = $3`,
+        [id.data, env.BRAND_ID, body.data.customer.id])).rows[0];
+      if (!row || row.sender !== "customer" || normalizePhone(row.phone) !== normalizePhone(body.data.customer.phone)) throw new HttpError(404, "Message not found", "not_found");
+      if (row.status !== "open" || row.latest_id !== row.id) throw new HttpError(409, "This message can't be edited any more because our team has already replied.", "locked");
+      if (row.body === body.data.text) return res.json({ ok: true, changed: false });
+
+      await tx(db, async (c) => {
+        await c.query(`UPDATE messages SET body = $2, edited_at = now(), original_body = COALESCE(original_body, body) WHERE id = $1`, [row.id, body.data.text]);
+        // The old suggestion answered the old text: retire it so it can't be approved by mistake.
+        await c.query(`UPDATE ai_drafts SET status = 'superseded' WHERE conversation_id = $1 AND status = 'pending'`, [row.conversation_id]);
+      });
+      void startDraft(db, llm, row.id);
+      res.json({ ok: true, changed: true });
     } catch (e) { next(e); }
   });
   return r;

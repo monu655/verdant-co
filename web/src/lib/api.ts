@@ -30,7 +30,7 @@ export interface ConversationSummary {
   customer_name: string; customer_phone: string; last_body: string; last_sender: "customer" | "agent";
   unread: number; needs_reply: boolean; has_draft: boolean;
 }
-export interface Message { id: string; sender: "customer" | "agent"; body: string; created_at: string }
+export interface Message { id: string; sender: "customer" | "agent"; body: string; created_at: string; edited_at?: string | null }
 export interface Draft { id: string; message_id: string; status: "pending" | "failed" | "used" | "superseded"; body: string | null; needs_human: boolean; error: string | null; model: string | null }
 export type DraftState = "ready" | "generating" | "failed" | "missing" | "none";
 export interface ConversationDetail {

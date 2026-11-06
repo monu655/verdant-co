@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCheck, CircleCheck, Clock, Copy, Inbox, Info, MessageSquare, Phone, RefreshCw, RotateCcw, Search, Send, Sparkles, TriangleAlert, Undo2, X, Zap } from "lucide-react";
+import { ArrowLeft, CheckCheck, CircleCheck, Clock, Copy, Inbox, Info, MessageSquare, Pencil, Phone, RefreshCw, RotateCcw, Search, Send, Sparkles, TriangleAlert, Undo2, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { MessageEditor } from "../components/MessageEditor";
 import { Avatar, Badge, ConfirmDialog, EmptyState, ErrorState, Skeleton, Spinner, useToast } from "../components/ui";
 import { api, errorMessage, type ConversationDetail, type ConversationSummary } from "../lib/api";
 import { fullTime, shortTime, timeAgo } from "../lib/format";
@@ -269,6 +270,13 @@ function Chat({ id, onShowDetails, onToggleStatus, toggling }: { id: string; onS
     refetchInterval: 3000,
   });
   const detail = detailQ.data;
+  const toast = useToast();
+  const [editing, setEditing] = useState<string | null>(null);
+  const edit = useMutation({
+    mutationFn: (v: { id: string; text: string }) => api(`/api/messages/${v.id}`, { method: "PATCH", body: { text: v.text } }),
+    onSuccess: () => { setEditing(null); qc.invalidateQueries({ queryKey: ["conversation", id] }); qc.invalidateQueries({ queryKey: ["conversations"] }); toast.push("success", "Reply updated. The customer sees it marked as edited."); },
+    onError: (e) => toast.push("error", errorMessage(e)),
+  });
   const bottom = useRef<HTMLDivElement>(null);
   const lastMsg = detail?.messages[detail.messages.length - 1]?.id;
   const draftKey = detail?.draft?.id ?? detail?.draftState;
@@ -310,9 +318,19 @@ function Chat({ id, onShowDetails, onToggleStatus, toggling }: { id: string; onS
               <div className="flex items-center gap-3 py-1" role="separator"><span className="h-px flex-1 bg-line" /><span className="text-xs font-medium text-muted">{dayLabel(m.created_at)}</span><span className="h-px flex-1 bg-line" /></div>
             )}
           <div className={`message-in flex ${m.sender === "agent" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[85%] sm:max-w-[70%] ${m.sender === "agent" ? "items-end" : "items-start"} flex flex-col gap-1`}>
-              <p className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${m.sender === "agent" ? "rounded-br-md bg-forest-900 text-white" : "rounded-bl-md border border-line bg-white"}`}>{m.body}</p>
-              <span className="px-1 text-xs text-muted">{m.sender === "agent" ? "Approved reply · " : ""}{new Date(m.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+            <div className={`${editing === m.id ? "w-full max-w-[95%] sm:max-w-[80%]" : "max-w-[85%] sm:max-w-[70%]"} ${m.sender === "agent" ? "items-end" : "items-start"} flex flex-col gap-1`}>
+              {editing === m.id ? (
+                <MessageEditor initial={m.body} busy={edit.isPending} hint="The customer will see this reply marked as edited." onCancel={() => setEditing(null)} onSave={(t) => edit.mutate({ id: m.id, text: t })} />
+              ) : (
+                <p className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${m.sender === "agent" ? "rounded-br-md bg-forest-900 text-white" : "rounded-bl-md border border-line bg-white"}`}>{m.body}</p>
+              )}
+              {editing !== m.id && (
+                <span className="flex items-center gap-2 px-1 text-xs text-muted">
+                  {m.sender === "agent" ? "Approved reply · " : ""}{new Date(m.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                  {m.edited_at ? (m.sender === "agent" ? " · Edited" : " · Edited by customer") : ""}
+                  {m.sender === "agent" && <button type="button" className="inline-flex items-center gap-1 font-medium text-emerald-600 hover:underline" onClick={() => setEditing(m.id)}><Pencil aria-hidden className="h-3 w-3" />Edit</button>}
+                </span>
+              )}
             </div>
           </div>
           </div>

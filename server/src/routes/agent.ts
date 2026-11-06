@@ -70,7 +70,7 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
       if (!conv) throw new HttpError(404, "Conversation not found", "not_found");
 
       const messages = (await db.query(
-        `SELECT id, sender, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at, id`, [id.data])).rows;
+        `SELECT id, sender, body, created_at, edited_at FROM messages WHERE conversation_id = $1 ORDER BY created_at, id`, [id.data])).rows;
       const last = messages[messages.length - 1];
 
       // Current suggestion: a live (pending) draft wins; otherwise a failed attempt for the latest customer message.
@@ -257,6 +257,23 @@ export function agentRouter(db: Db, llm: LlmClient, env: Pick<Env, "BRAND_ID" | 
           FROM messages m JOIN conversations v ON v.id = m.conversation_id JOIN customers c ON c.id = v.customer_id
          ORDER BY m.created_at DESC, m.id DESC LIMIT 12`)).rows;
       res.json({ events: rows });
+    } catch (e) { next(e); }
+  });
+
+  // Agents can correct a reply they already sent. The original text is kept and the customer sees "Edited".
+  r.patch("/messages/:id", async (req, res, next) => {
+    try {
+      const id = uuid.safeParse(req.params.id);
+      if (!id.success) throw new HttpError(404, "Message not found", "not_found");
+      const { text } = z.object({ text: z.string().trim().min(1, "Message cannot be empty").max(MAX_MESSAGE_LENGTH, "Message is too long") }).parse(req.body);
+      const cur = (await db.query(`SELECT sender, body FROM messages WHERE id = $1`, [id.data])).rows[0];
+      if (!cur) throw new HttpError(404, "Message not found", "not_found");
+      if (cur.sender !== "agent") throw new HttpError(403, "Only agent replies can be edited here", "forbidden");
+      if (cur.body === text) return res.json({ message: cur, changed: false });
+      const row = (await db.query(
+        `UPDATE messages SET body = $2, edited_at = now(), original_body = COALESCE(original_body, body) WHERE id = $1 RETURNING id, sender, body, created_at, edited_at`,
+        [id.data, text])).rows[0];
+      res.json({ message: row, changed: true });
     } catch (e) { next(e); }
   });
 

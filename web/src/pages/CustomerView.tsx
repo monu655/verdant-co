@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, Leaf, MessageSquare, RotateCcw, Send, Truck } from "lucide-react";
+import { Banknote, Leaf, MessageSquare, Pencil, RotateCcw, Send, Truck } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { MessageEditor } from "../components/MessageEditor";
 import { CustomerTopBar } from "../components/TopBar";
 import { Avatar, ErrorState, Skeleton, Spinner, useToast } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { shortTime } from "../lib/format";
 
 interface TestCustomer { id: string; name: string; phone: string }
-interface PublicMessage { id: string; sender: "customer" | "agent"; body: string; created_at: string }
+interface PublicMessage { id: string; sender: "customer" | "agent"; body: string; created_at: string; edited_at?: string | null }
 const NEW = "__new__";
 const derivedId = (phone: string) => `web_${phone.replace(/\D/g, "")}`;
 
@@ -55,6 +56,12 @@ export function CustomerView() {
     mutationFn: () => api("/api/customer/messages", { method: "POST", body: { customer: identity, text } }),
     onSuccess: () => { setText(""); qc.invalidateQueries({ queryKey: ["customer-convo"] }); qc.invalidateQueries({ queryKey: ["stats"] }); },
     onError: (e) => toast.push("error", errorMessage(e)),
+  });
+  const [editing, setEditing] = useState<string | null>(null);
+  const edit = useMutation({
+    mutationFn: (v: { id: string; text: string }) => api(`/api/customer/messages/${v.id}`, { method: "PATCH", body: { customer: { id: convoId, phone: identity?.phone }, text: v.text } }),
+    onSuccess: () => { setEditing(null); qc.invalidateQueries({ queryKey: ["customer-convo"] }); toast.push("success", "Message updated"); },
+    onError: (e) => { toast.push("error", errorMessage(e)); qc.invalidateQueries({ queryKey: ["customer-convo"] }); setEditing(null); },
   });
   const submit = (e?: FormEvent) => { e?.preventDefault(); if (identity && text.trim() && !send.isPending) send.mutate(); };
   const onKey = (e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } };
@@ -138,15 +145,28 @@ export function CustomerView() {
                 <p className="max-w-xs text-sm text-muted">Type a question below or pick one of the quick questions.</p>
               </div>
             )}
-            {messages.map((m) => (
-              <div key={m.id} className={`message-in flex items-end gap-2 ${m.sender === "customer" ? "justify-end" : "justify-start"}`}>
-                {m.sender === "agent" && <span className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-forest-900 text-mint-100"><Leaf aria-hidden className="h-3.5 w-3.5" /></span>}
-                <div className="flex max-w-[82%] flex-col gap-1 sm:max-w-[72%]">
-                  <p className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${m.sender === "customer" ? "rounded-br-md bg-forest-900 text-white" : "rounded-bl-md border border-line bg-white"}`}>{m.body}</p>
-                  <span className={`px-1 text-xs text-muted ${m.sender === "customer" ? "text-right" : ""}`}>{m.sender === "agent" ? "Verdant & Co · " : ""}{shortTime(m.created_at)}</span>
+            {messages.map((m) => {
+              const mine = m.sender === "customer";
+              const canEdit = mine && m.id === last?.id; // only until the team has replied
+              return (
+                <div key={m.id} className={`message-in flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
+                  {!mine && <span className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-forest-900 text-mint-100"><Leaf aria-hidden className="h-3.5 w-3.5" /></span>}
+                  <div className={`flex flex-col gap-1 ${editing === m.id ? "w-full max-w-[92%] sm:max-w-[80%]" : "max-w-[82%] sm:max-w-[72%]"} ${mine ? "items-end" : "items-start"}`}>
+                    {editing === m.id ? (
+                      <MessageEditor initial={m.body} busy={edit.isPending} hint="Our team will see the updated message." onCancel={() => setEditing(null)} onSave={(t) => edit.mutate({ id: m.id, text: t })} />
+                    ) : (
+                      <p className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${mine ? "rounded-br-md bg-forest-900 text-white" : "rounded-bl-md border border-line bg-white"}`}>{m.body}</p>
+                    )}
+                    {editing !== m.id && (
+                      <span className="flex items-center gap-2 px-1 text-xs text-muted">
+                        {!mine ? "Verdant & Co · " : ""}{shortTime(m.created_at)}{m.edited_at ? " · Edited" : ""}
+                        {canEdit && <button type="button" className="inline-flex items-center gap-1 font-medium text-emerald-600 hover:underline" onClick={() => setEditing(m.id)}><Pencil aria-hidden className="h-3 w-3" />Edit</button>}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {last?.sender === "customer" && <p className="px-1 text-xs text-muted">Message received. A member of our team will reply here.</p>}
             <div ref={bottom} />
           </div>
