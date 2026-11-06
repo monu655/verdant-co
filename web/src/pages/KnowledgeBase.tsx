@@ -134,16 +134,16 @@ export function KnowledgeBasePage() {
                     {editing === e.id ? (
                       <EntryForm initial={e} busy={edit.isPending} error={edit.isError ? errorMessage(edit.error) : undefined} submitLabel="Save changes" onSubmit={(v) => edit.mutate({ id: e.id, ...v })} onCancel={() => { setEditing(null); edit.reset(); }} />
                     ) : (
-                      <div className="flex gap-4">
-                        <div className="min-w-0 flex-1">
-                          <h3 className="font-medium text-forest-900">{e.topic}</h3>
-                          <p className="mt-1 text-sm leading-relaxed">{e.policy}</p>
-                          <p className="mt-2 text-xs text-muted">Updated {timeAgo(e.updated_at)}</p>
+                      <div>
+                        <div className="flex items-start justify-between gap-3">
+                          <h3 className="min-w-0 font-medium text-forest-900">{e.topic}</h3>
+                          <div className="-mr-2 -mt-2 flex shrink-0 items-center">
+                            <button type="button" aria-label={`Edit ${e.topic}`} title="Edit" className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-mint-50 hover:text-forest-900" onClick={() => { setEditing(e.id); setAdding(false); edit.reset(); }}><Pencil aria-hidden className="h-4 w-4" /></button>
+                            <button type="button" aria-label={`Delete ${e.topic}`} title="Delete" className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-red-50 hover:text-danger" onClick={() => setDeleting(e)}><Trash2 aria-hidden className="h-4 w-4" /></button>
+                          </div>
                         </div>
-                        <div className="flex shrink-0 items-start gap-1">
-                          <button type="button" aria-label={`Edit ${e.topic}`} title="Edit" className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-mint-50 hover:text-forest-900" onClick={() => { setEditing(e.id); setAdding(false); edit.reset(); }}><Pencil aria-hidden className="h-4 w-4" /></button>
-                          <button type="button" aria-label={`Delete ${e.topic}`} title="Delete" className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-red-50 hover:text-danger" onClick={() => setDeleting(e)}><Trash2 aria-hidden className="h-4 w-4" /></button>
-                        </div>
+                        <p className="-mt-1 text-sm leading-relaxed">{e.policy}</p>
+                        <p className="mt-2 text-xs text-muted">Updated {timeAgo(e.updated_at)}</p>
                       </div>
                     )}
                   </li>
